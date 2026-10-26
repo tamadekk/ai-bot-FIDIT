@@ -82,6 +82,7 @@ DETAIL_REPLY_NO = "no"
 
 DETAIL_BUTTON_USER_MESSAGE = "Želim detaljno objašnjenje."
 DETAIL_DECLINED_REPLY = "U redu. Slobodno postavite novo pitanje."
+MARKDOWN_LIST_ITEM_PATTERN = re.compile(r"^\s*(?:[*+-]|\d+\.)\s")
 
 BASE_INSTRUCTION = (
     "Odgovaraj kao arhitektonski savjetnik. "
@@ -254,8 +255,21 @@ def build_provider_error_response(error: Exception):
     )
 
 
+def separate_lists_from_paragraphs(reply_markdown: str) -> str:
+    separated_lines = []
+    for line in reply_markdown.splitlines():
+        previous_line = separated_lines[-1] if separated_lines else ""
+        is_list_item = MARKDOWN_LIST_ITEM_PATTERN.match(line)
+        follows_paragraph = previous_line.strip() and not MARKDOWN_LIST_ITEM_PATTERN.match(previous_line)
+        if is_list_item and follows_paragraph:
+            separated_lines.append("")
+        separated_lines.append(line)
+    return "\n".join(separated_lines)
+
+
 def build_reply_response(reply_markdown: str, offer_detail: bool):
-    return jsonify({"reply": markdown.markdown(reply_markdown), "offer_detail": offer_detail})
+    reply_html = markdown.markdown(separate_lists_from_paragraphs(reply_markdown))
+    return jsonify({"reply": reply_html, "offer_detail": offer_detail})
 
 
 @app.route("/")
