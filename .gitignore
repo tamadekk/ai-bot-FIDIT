@@ -1,0 +1,5 @@
+.env
+.venv/
+.venv-linux/
+__pycache__/
+backend/uploads/

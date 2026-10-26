@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="hr">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Arhitektonski chatbot</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="chat-container">
+        <div class="chat-header">
+            <img src="assets/logo.svg" alt="Logo" />
+            <p>Arhitektonski savjetnik</p>
+        </div>
+
+        <div id="chatbox"></div>
+
+        <div class="upload-area">
+            <label for="fileInput" class="upload-btn">Dodaj dokument</label>
+            <input id="fileInput" type="file" accept=".pdf,.docx,.txt" hidden>
+            <span id="fileName">Nema odabranog dokumenta</span>
+        </div>
+
+        <div class="input-area">
+            <input id="input" type="text" placeholder="Postavite pitanje ...">
+            <button id="sendBtn">Pošalji</button>
+        </div>
+
+        <div class="chat-footer">
+            <img src="assets/logo-edih.png" alt="logo edih">
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

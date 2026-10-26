@@ -1,0 +1,9 @@
+Flask
+flask-cors
+markdown
+python-dotenv
+mistralai==3.3.0
+PyPDF2
+python-docx
+numpy
+google-genai
