@@ -31,8 +31,8 @@ Stranica sadrži chat, polje za poruku i odabir datoteke. Kontrola za upload ogr
 ### `frontend/script.js` — komunikacija preglednika s backendom
 
 - Prikazuje poruke u razgovoru.
-- Šalje pitanja kao JSON na `http://localhost:5000/chat`.
-- Šalje odabranu datoteku kao `multipart/form-data` na `http://localhost:5000/upload`.
+- Šalje pitanja kao JSON na `/chat`.
+- Šalje odabranu datoteku kao `multipart/form-data` na `/upload`.
 - Prikazuje poruke o uspješnom uploadu ili grešci.
 
 ### `frontend/style.css` — izgled
