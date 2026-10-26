@@ -7,7 +7,6 @@ import numpy as np
 from dotenv import load_dotenv
 from docx import Document
 from flask import Flask, jsonify, request
-from flask_cors import CORS
 from google import genai
 from google.genai import types as genai_types
 from mistralai.client.sdk import Mistral
@@ -25,7 +24,6 @@ load_dotenv(PROJECT_DIR / ".env")
 
 app = Flask(__name__, static_folder=str(FRONTEND_DIR), static_url_path="")
 app.config["UPLOAD_FOLDER"] = str(UPLOAD_FOLDER)
-CORS(app)
 
 PROVIDER_MISTRAL = "mistral"
 PROVIDER_GEMINI = "gemini"

@@ -66,7 +66,6 @@ Popis Python paketa koje je potrebno instalirati da bi backend radio.
 | Paket | Namjena |
 |---|---|
 | `Flask` | Flask web-poslužitelj i API rute `/chat` i `/upload`. |
-| `flask-cors` | Omogućuje pregledniku da šalje zahtjeve backendu preko CORS-a. |
 | `mistralai` | Mistral SDK za chat odgovore i embeddinge. |
 | `python-dotenv` | Učitava API ključ iz lokalne `.env` datoteke. |
 | `markdown` | Pretvara Markdown odgovor modela u HTML. |

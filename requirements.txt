@@ -1,5 +1,4 @@
 Flask
-flask-cors
 markdown
 python-dotenv
 mistralai==3.3.0
