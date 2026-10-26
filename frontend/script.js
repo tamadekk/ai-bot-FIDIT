@@ -12,7 +12,7 @@ const DETAIL_OFFER_TEXT = "Želite li detaljnije objašnjenje? Kliknite gumb ili
 const sessionId = localStorage.getItem("architectChatSessionId") || crypto.randomUUID();
 localStorage.setItem("architectChatSessionId", sessionId);
 
-function appendMessage(sender, text) {
+function appendMessage(sender, content, { isHtml = false } = {}) {
     const msg = document.createElement("div");
     msg.className = "message " + sender;
 
@@ -22,7 +22,11 @@ function appendMessage(sender, text) {
 
     const bubble = document.createElement("div");
     bubble.className = "bubble";
-    bubble.innerHTML = text;
+    if (isHtml) {
+        bubble.innerHTML = content;
+    } else {
+        bubble.textContent = content;
+    }
 
     msg.appendChild(avatar);
     msg.appendChild(bubble);
@@ -66,7 +70,7 @@ const postChatRequest = async (payload) => {
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || "Greška na serveru");
 
-        const replyBubble = appendMessage("bot", data.reply);
+        const replyBubble = appendMessage("bot", data.reply, { isHtml: true });
         if (data.offer_detail) {
             appendDetailOffer(replyBubble);
         }
@@ -99,7 +103,7 @@ async function uploadDocument(file) {
             throw new Error(data.error || "Greška pri uploadu dokumenta");
         }
 
-        appendMessage("bot", `<strong>Dokument je uploadan.</strong><br>${data.message}`);
+        appendMessage("bot", `Dokument je uploadan. ${data.message}`);
     } catch (error) {
         appendMessage("bot", "Greška pri uploadu: " + error.message);
     }
