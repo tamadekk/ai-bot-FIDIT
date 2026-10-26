@@ -143,6 +143,11 @@ body {
     background: #009FB0;
 }
 
+#sendBtn:disabled {
+    background: #9adbe3;
+    cursor: default;
+}
+
 .chat-footer {
     flex: 0 0 50px;
     display: flex;
@@ -197,4 +202,26 @@ body {
 .detail-btn:disabled {
     opacity: 0.5;
     cursor: default;
+}
+
+.bubble.thinking {
+    font-style: italic;
+    opacity: 0.85;
+}
+
+.thinking-dot {
+    animation: thinkingBlink 1.4s infinite both;
+}
+
+.thinking-dot:nth-child(2) {
+    animation-delay: 0.2s;
+}
+
+.thinking-dot:nth-child(3) {
+    animation-delay: 0.4s;
+}
+
+@keyframes thinkingBlink {
+    0%, 80%, 100% { opacity: 0; }
+    40% { opacity: 1; }
 }

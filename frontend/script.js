@@ -12,6 +12,8 @@ const BOT_AVATAR = "assets/bot.png";
 const DETAIL_BUTTON_LABEL = "Prikaži detaljno objašnjenje";
 const DETAIL_BUTTON_USER_MESSAGE = "Želim detaljno objašnjenje.";
 const DETAIL_OFFER_TEXT = "Želite li detaljnije objašnjenje? Kliknite gumb ili odgovorite s „da” ili „ne”.";
+const THINKING_TEXT = "Razmišljam";
+const THINKING_DOT_COUNT = 3;
 
 const sessionId = localStorage.getItem(SESSION_STORAGE_KEY) || crypto.randomUUID();
 localStorage.setItem(SESSION_STORAGE_KEY, sessionId);
@@ -72,7 +74,29 @@ const appendDetailOffer = (bubble) => {
     scrollChatToBottom();
 };
 
+const showThinkingIndicator = () => {
+    const thinkingBubble = appendMessage("bot", THINKING_TEXT);
+    thinkingBubble.classList.add("thinking");
+
+    for (let dotIndex = 0; dotIndex < THINKING_DOT_COUNT; dotIndex += 1) {
+        const dot = document.createElement("span");
+        dot.className = "thinking-dot";
+        dot.textContent = ".";
+        thinkingBubble.appendChild(dot);
+    }
+
+    return thinkingBubble.closest(".message");
+};
+
+const setChatInputEnabled = (isEnabled) => {
+    input.disabled = !isEnabled;
+    sendBtn.disabled = !isEnabled;
+};
+
 const sendChatRequest = async (payload) => {
+    setChatInputEnabled(false);
+    const thinkingMessage = showThinkingIndicator();
+
     try {
         const chatResponse = await postJson(
             CHAT_URL,
@@ -82,14 +106,19 @@ const sendChatRequest = async (payload) => {
             },
             "Greška na serveru",
         );
+        thinkingMessage.remove();
 
         const replyBubble = appendMessage("bot", chatResponse.reply, { isHtml: true });
         if (chatResponse.offer_detail) {
             appendDetailOffer(replyBubble);
         }
     } catch (error) {
+        thinkingMessage.remove();
         console.error("CHAT ERROR:", error);
         appendMessage("bot", `Greška: ${error.message}`);
+    } finally {
+        setChatInputEnabled(true);
+        input.focus();
     }
 };
 
