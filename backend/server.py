@@ -1,5 +1,6 @@
 import os
 import re
+from http import HTTPStatus
 from pathlib import Path
 
 import markdown
@@ -218,6 +219,24 @@ def find_relevant_context(question: str, top_k: int) -> str:
     return "\n\n".join(DOCUMENT_STORE["chunks"][index] for index in closest_chunk_indices)
 
 
+def build_error_response(message: str, status: HTTPStatus):
+    return jsonify({"error": message}), status
+
+
+def build_provider_error_response(error: Exception):
+    print(f"{provider_name} API greška:", error)
+    status_code = getattr(error, "status_code", None) or getattr(error, "code", None)
+    if status_code == HTTPStatus.TOO_MANY_REQUESTS:
+        return build_error_response(
+            f"{provider_name} API ograničio je broj zahtjeva. Pričekaj malo pa pokušaj ponovno.",
+            HTTPStatus.TOO_MANY_REQUESTS,
+        )
+    return build_error_response(
+        f"Došlo je do greške prilikom komunikacije s {provider_name} API-jem.",
+        HTTPStatus.INTERNAL_SERVER_ERROR,
+    )
+
+
 @app.route("/")
 def serve_frontend_page():
     return app.send_static_file(FRONTEND_PAGE)
@@ -244,7 +263,11 @@ def upload_document():
 
     text = extract_text(upload_path, extension)
     chunks = chunk_text(text)
-    index_document(chunks)
+
+    try:
+        index_document(chunks)
+    except Exception as error:
+        return build_provider_error_response(error)
 
     return jsonify({
         "message": "Dokument je uspješno uploadan i obrađen.",
@@ -333,14 +356,8 @@ def chat():
         reply_html = markdown.markdown(reply_raw)
         return jsonify({"reply": reply_html, "offer_detail": not wants_detailed_answer})
 
-    except Exception as exc:
-        print(f"{provider_name} API greška:", exc)
-        status_code = getattr(exc, "status_code", None) or getattr(exc, "code", None)
-        if status_code == 429:
-            return jsonify({
-                "error": f"{provider_name} API ograničio je broj zahtjeva. Pričekaj malo pa pokušaj ponovno."
-            }), 429
-        return jsonify({"error": f"Došlo je do greške prilikom komunikacije s {provider_name} API-jem."}), 500
+    except Exception as error:
+        return build_provider_error_response(error)
 
 
 if __name__ == "__main__":
