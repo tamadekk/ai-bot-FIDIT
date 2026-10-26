@@ -84,6 +84,13 @@ DETAIL_REPLY_NO = "no"
 DETAIL_BUTTON_USER_MESSAGE = "Želim detaljno objašnjenje."
 DETAIL_DECLINED_REPLY = "U redu. Slobodno postavite novo pitanje."
 
+BASE_INSTRUCTION = (
+    "Odgovaraj kao arhitektonski savjetnik. "
+    "Pazi na kontekst razgovora i zapamti posljednje poruke korisnika. "
+    "Ako korisnik postavlja follow-up pitanje poput 'što o stanu?', 'a kako sa kućom?' ili 'daj primjer', "
+    "odgovori uzimajući u obzir prethodni razgovor i temu koja je već bila spomenuta. "
+    "Koristi informacije iz dokumenta ako su relevantne. "
+)
 SHORT_ANSWER_INSTRUCTION = (
     "Odgovori KRATKO: najviše 1–2 rečenice, bez naslova, lista i primjera. "
     "Nemoj nuditi detaljnije objašnjenje, to će sučelje ponuditi samo."
@@ -120,17 +127,6 @@ def trim_conversation_history(history: list[dict[str, str]]) -> list[dict[str, s
     return history
 
 
-def format_conversation_history(history: list[dict[str, str]]) -> str:
-    if not history:
-        return "Nema prethodnog razgovora."
-
-    lines = []
-    for message in history:
-        role = "Korisnik" if message["role"] == "user" else "Asistent"
-        lines.append(f"{role}: {message['content']}")
-    return "\n".join(lines)
-
-
 def classify_detail_reply(user_message: str) -> str | None:
     normalized_message = re.sub(r"[^\w\s]", "", user_message.lower()).strip()
     if normalized_message in AFFIRMATIVE_REPLIES:
@@ -147,24 +143,17 @@ def build_chat_messages(
 ) -> list[dict[str, str]]:
     history = trim_conversation_history(get_session_history(session_id))
     mode_settings = ANSWER_MODE_SETTINGS[answer_mode]
-    context = find_relevant_context(user_message, top_k=mode_settings["context_chunks"])
+    context = find_relevant_context(user_message, mode_settings["context_chunks"])
 
     system_prompt = (
-        "Odgovaraj kao arhitektonski savjetnik. "
-        "Pazi na kontekst razgovora i zapamti posljednje poruke korisnika. "
-        "Ako korisnik postavlja follow-up pitanje poput 'što o stanu?', 'a kako sa kućom?' ili 'daj primjer', "
-        "odgovori uzimajući u obzir prethodni razgovor i temu koja je već bila spomenuta. "
-        "Koristi informacije iz dokumenta ako su relevantne. "
-        f"{mode_settings['instruction']}\n\n"
-        f"Prethodni razgovor:\n{format_conversation_history(history)}\n\n"
+        f"{BASE_INSTRUCTION}{mode_settings['instruction']}\n\n"
         f"Kontekst dokumenta:\n{context}"
     )
-
-    messages = [{"role": "system", "content": system_prompt}]
-    for previous in history:
-        messages.append({"role": previous["role"], "content": previous["content"]})
-    messages.append({"role": "user", "content": user_message})
-    return messages
+    return [
+        {"role": "system", "content": system_prompt},
+        *history,
+        {"role": "user", "content": user_message},
+    ]
 
 
 def extract_text(file_path: str, extension: str) -> str:

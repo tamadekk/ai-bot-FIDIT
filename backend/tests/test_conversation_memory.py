@@ -41,7 +41,7 @@ class TestConversationMemory(unittest.TestCase):
 
         messages = server.build_chat_messages("What about an apartment?", session_id)
 
-        self.assertIn("holiday house", messages[0]["content"].lower())
+        self.assertIn("holiday house", messages[1]["content"].lower())
         self.assertIn("What about an apartment?", messages[-1]["content"])
 
 
