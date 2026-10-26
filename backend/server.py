@@ -54,9 +54,12 @@ else:
 with open(APP_DIR / "architecture_context.md", "r", encoding="utf-8") as f:
     ARCHITECTURE_CONTEXT = f.read()
 
+CHUNK_SIZE = 800
+CHUNK_OVERLAP = 120
+
 DOCUMENT_STORE = {
     "chunks": [],
-    "embeddings": [],
+    "embeddings": None,
 }
 
 CONVERSATION_MEMORY: dict[str, list[dict[str, str]]] = {}
@@ -184,67 +187,35 @@ def extract_text(file_path: str, extension: str) -> str:
     return ""
 
 
-def chunk_text(text: str, chunk_size: int = 800, overlap: int = 120) -> list[str]:
-    if not text:
-        return []
-
-    chunks = []
-    start = 0
-    while start < len(text):
-        end = min(start + chunk_size, len(text))
-        chunks.append(text[start:end])
-        start += chunk_size - overlap
-    return chunks
+def chunk_text(text: str) -> list[str]:
+    chunk_step = CHUNK_SIZE - CHUNK_OVERLAP
+    chunks = [text[start:start + CHUNK_SIZE] for start in range(0, len(text), chunk_step)]
+    return [chunk for chunk in chunks if chunk.strip()]
 
 
-def embed_text(text: str):
-    if not text or not text.strip():
-        return None
-
+def embed_text(text: str) -> np.ndarray:
     if is_gemini_provider:
-        response = client.models.embed_content(model=embedding_model, contents=[text.strip()])
-        embedding_values = response.embeddings[0].values
-    else:
-        response = client.embeddings.create(model=embedding_model, inputs=[text.strip()])
-        embedding_values = response.data[0].embedding
+        response = client.models.embed_content(model=embedding_model, contents=[text])
+        return np.asarray(response.embeddings[0].values, dtype="float32")
 
-    return np.asarray(embedding_values, dtype="float32")
+    response = client.embeddings.create(model=embedding_model, inputs=[text])
+    return np.asarray(response.data[0].embedding, dtype="float32")
 
 
-def index_document_chunks(chunks: list[str]):
-    embeddings = []
-    for chunk in chunks:
-        embedding = embed_text(chunk)
-        if embedding is not None:
-            embeddings.append(embedding)
-
+def index_document(chunks: list[str]):
+    embeddings = np.vstack([embed_text(chunk) for chunk in chunks]) if chunks else None
     DOCUMENT_STORE["chunks"] = chunks
     DOCUMENT_STORE["embeddings"] = embeddings
-    return chunks
 
 
-def find_relevant_context(user_message: str, top_k: int = 3) -> str:
-    if not DOCUMENT_STORE["chunks"] or not DOCUMENT_STORE["embeddings"]:
+def find_relevant_context(question: str, top_k: int) -> str:
+    has_indexed_document = bool(DOCUMENT_STORE["chunks"])
+    if not has_indexed_document:
         return ARCHITECTURE_CONTEXT
 
-    embeddings = np.vstack(DOCUMENT_STORE["embeddings"]).astype("float32")
-    query_vector = embed_text(user_message)
-    if query_vector is None:
-        return ARCHITECTURE_CONTEXT
-
-    distances = np.sum((embeddings - query_vector) ** 2, axis=1)
-    indices = np.argsort(distances)[:top_k]
-
-    relevant_chunks = [
-        DOCUMENT_STORE["chunks"][idx]
-        for idx in indices
-        if 0 <= idx < len(DOCUMENT_STORE["chunks"])
-    ]
-
-    if not relevant_chunks:
-        return ARCHITECTURE_CONTEXT
-
-    return "\n\n".join(relevant_chunks)
+    distances = np.sum((DOCUMENT_STORE["embeddings"] - embed_text(question)) ** 2, axis=1)
+    closest_chunk_indices = np.argsort(distances)[:top_k]
+    return "\n\n".join(DOCUMENT_STORE["chunks"][index] for index in closest_chunk_indices)
 
 
 @app.route("/")
@@ -273,7 +244,7 @@ def upload_document():
 
     text = extract_text(upload_path, extension)
     chunks = chunk_text(text)
-    index_document_chunks(chunks)
+    index_document(chunks)
 
     return jsonify({
         "message": "Dokument je uspješno uploadan i obrađen.",
