@@ -24,7 +24,6 @@ UPLOAD_FOLDER.mkdir(exist_ok=True)
 load_dotenv(PROJECT_DIR / ".env")
 
 app = Flask(__name__, static_folder=str(FRONTEND_DIR), static_url_path="")
-app.config["UPLOAD_FOLDER"] = str(UPLOAD_FOLDER)
 
 PROVIDER_MISTRAL = "mistral"
 PROVIDER_GEMINI = "gemini"
@@ -52,9 +51,9 @@ else:
     embedding_model = "mistral-embed"
     client = Mistral(api_key=api_key)
 
-with open(APP_DIR / "architecture_context.md", "r", encoding="utf-8") as f:
-    ARCHITECTURE_CONTEXT = f.read()
+ARCHITECTURE_CONTEXT = (APP_DIR / "architecture_context.md").read_text(encoding="utf-8")
 
+ALLOWED_EXTENSIONS = {"txt", "pdf", "docx"}
 CHUNK_SIZE = 800
 CHUNK_OVERLAP = 120
 
@@ -63,9 +62,9 @@ DOCUMENT_STORE = {
     "embeddings": None,
 }
 
-CONVERSATION_MEMORY: dict[str, list[dict[str, str]]] = {}
+DEFAULT_SESSION_ID = "default"
 MAX_CONVERSATION_HISTORY = 12
-
+CONVERSATION_MEMORY: dict[str, list[dict[str, str]]] = {}
 PENDING_DETAIL_QUESTIONS: dict[str, str] = {}
 
 ANSWER_MODE_SHORT = "short"
@@ -115,16 +114,18 @@ ANSWER_MODE_SETTINGS = {
 
 
 def get_session_history(session_id: str) -> list[dict[str, str]]:
-    session_id = session_id or "default"
-    if session_id not in CONVERSATION_MEMORY:
-        CONVERSATION_MEMORY[session_id] = []
-    return CONVERSATION_MEMORY[session_id]
+    return CONVERSATION_MEMORY.setdefault(session_id, [])
 
 
 def trim_conversation_history(history: list[dict[str, str]]) -> list[dict[str, str]]:
-    if len(history) > MAX_CONVERSATION_HISTORY:
-        return history[-MAX_CONVERSATION_HISTORY:]
-    return history
+    return history[-MAX_CONVERSATION_HISTORY:]
+
+
+def remember_exchange(session_id: str, user_message: str, assistant_reply: str):
+    history = get_session_history(session_id)
+    history.append({"role": "user", "content": user_message})
+    history.append({"role": "assistant", "content": assistant_reply})
+    CONVERSATION_MEMORY[session_id] = trim_conversation_history(history)
 
 
 def classify_detail_reply(user_message: str) -> str | None:
@@ -136,44 +137,13 @@ def classify_detail_reply(user_message: str) -> str | None:
     return None
 
 
-def build_chat_messages(
-    user_message: str,
-    session_id: str,
-    answer_mode: str = ANSWER_MODE_SHORT,
-) -> list[dict[str, str]]:
-    history = trim_conversation_history(get_session_history(session_id))
-    mode_settings = ANSWER_MODE_SETTINGS[answer_mode]
-    context = find_relevant_context(user_message, mode_settings["context_chunks"])
-
-    system_prompt = (
-        f"{BASE_INSTRUCTION}{mode_settings['instruction']}\n\n"
-        f"Kontekst dokumenta:\n{context}"
-    )
-    return [
-        {"role": "system", "content": system_prompt},
-        *history,
-        {"role": "user", "content": user_message},
-    ]
-
-
-def extract_text(file_path: str, extension: str) -> str:
-    extension = extension.lower()
-
+def extract_text(file_path: Path, extension: str) -> str:
     if extension == "txt":
-        with open(file_path, "r", encoding="utf-8", errors="ignore") as file:
-            return file.read()
-
+        return file_path.read_text(encoding="utf-8", errors="ignore")
     if extension == "pdf":
-        reader = PdfReader(file_path)
-        return "\n".join(
-            page.extract_text() or ""
-            for page in reader.pages
-        )
-
+        return "\n".join(page.extract_text() or "" for page in PdfReader(str(file_path)).pages)
     if extension == "docx":
-        document = Document(file_path)
-        return "\n".join(paragraph.text for paragraph in document.paragraphs)
-
+        return "\n".join(paragraph.text for paragraph in Document(str(file_path)).paragraphs)
     return ""
 
 
@@ -208,61 +178,34 @@ def find_relevant_context(question: str, top_k: int) -> str:
     return "\n\n".join(DOCUMENT_STORE["chunks"][index] for index in closest_chunk_indices)
 
 
-def build_error_response(message: str, status: HTTPStatus):
-    return jsonify({"error": message}), status
+def build_chat_messages(
+    user_message: str,
+    session_id: str,
+    answer_mode: str = ANSWER_MODE_SHORT,
+) -> list[dict[str, str]]:
+    history = trim_conversation_history(get_session_history(session_id))
+    mode_settings = ANSWER_MODE_SETTINGS[answer_mode]
+    context = find_relevant_context(user_message, mode_settings["context_chunks"])
 
-
-def build_provider_error_response(error: Exception):
-    print(f"{provider_name} API greška:", error)
-    status_code = getattr(error, "status_code", None) or getattr(error, "code", None)
-    if status_code == HTTPStatus.TOO_MANY_REQUESTS:
-        return build_error_response(
-            f"{provider_name} API ograničio je broj zahtjeva. Pričekaj malo pa pokušaj ponovno.",
-            HTTPStatus.TOO_MANY_REQUESTS,
-        )
-    return build_error_response(
-        f"Došlo je do greške prilikom komunikacije s {provider_name} API-jem.",
-        HTTPStatus.INTERNAL_SERVER_ERROR,
+    system_prompt = (
+        f"{BASE_INSTRUCTION}{mode_settings['instruction']}\n\n"
+        f"Kontekst dokumenta:\n{context}"
     )
+    return [
+        {"role": "system", "content": system_prompt},
+        *history,
+        {"role": "user", "content": user_message},
+    ]
 
 
-@app.route("/")
-def serve_frontend_page():
-    return app.send_static_file(FRONTEND_PAGE)
-
-
-@app.route("/upload", methods=["POST"])
-def upload_document():
-    if "file" not in request.files:
-        return jsonify({"error": "Nijedan dokument nije poslan."}), 400
-
-    file = request.files["file"]
-    if file.filename == "":
-        return jsonify({"error": "Datoteka nema naziv."}), 400
-
-    filename = secure_filename(file.filename)
-    extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-    allowed_extensions = {"txt", "pdf", "docx"}
-
-    if extension not in allowed_extensions:
-        return jsonify({"error": "Podržani formati: TXT, PDF i DOCX. Stari DOC format nije podržan."}), 400
-
-    upload_path = os.path.join(app.config["UPLOAD_FOLDER"], filename)
-    file.save(upload_path)
-
-    text = extract_text(upload_path, extension)
-    chunks = chunk_text(text)
-
-    try:
-        index_document(chunks)
-    except Exception as error:
-        return build_provider_error_response(error)
-
-    return jsonify({
-        "message": "Dokument je uspješno uploadan i obrađen.",
-        "chunks": len(chunks),
-        "filename": filename,
-    })
+def complete_with_mistral(messages: list[dict[str, str]], max_tokens: int) -> str:
+    response = client.chat.complete(
+        model=chat_model,
+        messages=messages,
+        temperature=CHAT_TEMPERATURE,
+        max_tokens=max_tokens,
+    )
+    return response.choices[0].message.content or ""
 
 
 def complete_with_gemini(messages: list[dict[str, str]], max_tokens: int) -> str:
@@ -289,64 +232,107 @@ def complete_with_gemini(messages: list[dict[str, str]], max_tokens: int) -> str
 def generate_reply(question: str, session_id: str, answer_mode: str) -> str:
     messages = build_chat_messages(question, session_id, answer_mode)
     max_tokens = ANSWER_MODE_SETTINGS[answer_mode]["max_tokens"]
+    complete_chat = complete_with_gemini if is_gemini_provider else complete_with_mistral
+    return complete_chat(messages, max_tokens)
 
-    if is_gemini_provider:
-        return complete_with_gemini(messages, max_tokens)
 
-    response = client.chat.complete(
-        model=chat_model,
-        messages=messages,
-        temperature=CHAT_TEMPERATURE,
-        max_tokens=max_tokens,
+def build_error_response(message: str, status: HTTPStatus):
+    return jsonify({"error": message}), status
+
+
+def build_provider_error_response(error: Exception):
+    print(f"{provider_name} API greška:", error)
+    status_code = getattr(error, "status_code", None) or getattr(error, "code", None)
+    if status_code == HTTPStatus.TOO_MANY_REQUESTS:
+        return build_error_response(
+            f"{provider_name} API ograničio je broj zahtjeva. Pričekaj malo pa pokušaj ponovno.",
+            HTTPStatus.TOO_MANY_REQUESTS,
+        )
+    return build_error_response(
+        f"Došlo je do greške prilikom komunikacije s {provider_name} API-jem.",
+        HTTPStatus.INTERNAL_SERVER_ERROR,
     )
-    return response.choices[0].message.content or ""
 
 
-def remember_exchange(session_id: str, user_message: str, assistant_reply: str):
-    history = get_session_history(session_id)
-    history.append({"role": "user", "content": user_message})
-    history.append({"role": "assistant", "content": assistant_reply})
-    CONVERSATION_MEMORY[session_id] = trim_conversation_history(history)
+def build_reply_response(reply_markdown: str, offer_detail: bool):
+    return jsonify({"reply": markdown.markdown(reply_markdown), "offer_detail": offer_detail})
+
+
+@app.route("/")
+def serve_frontend_page():
+    return app.send_static_file(FRONTEND_PAGE)
+
+
+@app.route("/upload", methods=["POST"])
+def upload_document():
+    uploaded_file = request.files.get("file")
+    if uploaded_file is None:
+        return build_error_response("Nijedan dokument nije poslan.", HTTPStatus.BAD_REQUEST)
+
+    filename = secure_filename(uploaded_file.filename or "")
+    if not filename:
+        return build_error_response("Datoteka nema naziv.", HTTPStatus.BAD_REQUEST)
+
+    extension = Path(filename).suffix.lstrip(".").lower()
+    if extension not in ALLOWED_EXTENSIONS:
+        return build_error_response(
+            "Podržani formati: TXT, PDF i DOCX. Stari DOC format nije podržan.",
+            HTTPStatus.BAD_REQUEST,
+        )
+
+    upload_path = UPLOAD_FOLDER / filename
+    uploaded_file.save(upload_path)
+    chunks = chunk_text(extract_text(upload_path, extension))
+
+    try:
+        index_document(chunks)
+    except Exception as error:
+        return build_provider_error_response(error)
+
+    return jsonify({
+        "message": "Dokument je uspješno uploadan i obrađen.",
+        "chunks": len(chunks),
+        "filename": filename,
+    })
 
 
 @app.route("/chat", methods=["POST"])
 def chat():
-    data = request.get_json(silent=True) or {}
-    user_message = data.get("message", "").strip()
-    session_id = str(data.get("session_id") or "default")
-    is_detail_button_click = data.get("detail") is True
+    request_data = request.get_json(silent=True) or {}
+    user_message = request_data.get("message", "").strip()
+    session_id = str(request_data.get("session_id") or DEFAULT_SESSION_ID)
+    is_detail_button_click = request_data.get("detail") is True
 
     if not user_message and not is_detail_button_click:
-        return jsonify({"error": "Nije poslan tekst poruke."}), 400
+        return build_error_response("Nije poslan tekst poruke.", HTTPStatus.BAD_REQUEST)
 
     pending_question = PENDING_DETAIL_QUESTIONS.get(session_id)
-    detail_reply = classify_detail_reply(user_message)
-    wants_detailed_answer = is_detail_button_click or (bool(pending_question) and detail_reply == DETAIL_REPLY_YES)
-    declines_detailed_answer = bool(pending_question) and detail_reply == DETAIL_REPLY_NO
-
     if is_detail_button_click and not pending_question:
-        return jsonify({"error": "Nema pitanja za koje bi se dalo detaljno objašnjenje."}), 400
+        return build_error_response(
+            "Nema pitanja za koje bi se dalo detaljno objašnjenje.",
+            HTTPStatus.BAD_REQUEST,
+        )
 
-    if declines_detailed_answer:
-        PENDING_DETAIL_QUESTIONS.pop(session_id, None)
+    detail_reply = classify_detail_reply(user_message) if pending_question else None
+    if detail_reply == DETAIL_REPLY_NO:
+        PENDING_DETAIL_QUESTIONS.pop(session_id)
         remember_exchange(session_id, user_message, DETAIL_DECLINED_REPLY)
-        return jsonify({"reply": markdown.markdown(DETAIL_DECLINED_REPLY), "offer_detail": False})
+        return build_reply_response(DETAIL_DECLINED_REPLY, offer_detail=False)
+
+    wants_detailed_answer = is_detail_button_click or detail_reply == DETAIL_REPLY_YES
 
     try:
         if wants_detailed_answer:
-            reply_raw = generate_reply(pending_question, session_id, ANSWER_MODE_DETAILED)
-            PENDING_DETAIL_QUESTIONS.pop(session_id, None)
-            remember_exchange(session_id, user_message or DETAIL_BUTTON_USER_MESSAGE, reply_raw)
+            reply = generate_reply(pending_question, session_id, ANSWER_MODE_DETAILED)
+            PENDING_DETAIL_QUESTIONS.pop(session_id)
         else:
-            reply_raw = generate_reply(user_message, session_id, ANSWER_MODE_SHORT)
+            reply = generate_reply(user_message, session_id, ANSWER_MODE_SHORT)
             PENDING_DETAIL_QUESTIONS[session_id] = user_message
-            remember_exchange(session_id, user_message, reply_raw)
-
-        reply_html = markdown.markdown(reply_raw)
-        return jsonify({"reply": reply_html, "offer_detail": not wants_detailed_answer})
-
     except Exception as error:
         return build_provider_error_response(error)
+
+    remember_exchange(session_id, user_message or DETAIL_BUTTON_USER_MESSAGE, reply)
+    return build_reply_response(reply, offer_detail=not wants_detailed_answer)
 
 
 if __name__ == "__main__":
